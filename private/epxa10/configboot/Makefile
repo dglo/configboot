@@ -50,7 +50,14 @@ memset.o: memset.S
 # c:\quartus\bin\makeprogfile.exe -e EPC8 --pof configboot.pof \
 #   simpletest.sbd simpletest.psof configboot.hex
 #
-
-
-
+configboot.tar.gz: $(CONFIGBOOTHEX)
+	rm -rf tmp
+	mkdir tmp
+	cp $(CONFIGBOOTHEX) \
+		../../../dom-fpga/configboot/epxa4DPM/configboot.sbi \
+		../../../dom-fpga/configboot/epxa4DPM/configboot.sbd \
+		../../../dom-fpga/configboot/epxa4DPM/configboot.psof \
+		../../../dom-ws/epxa10/bin/configboot.hex tmp
+	cd tmp; tar cf - . | gzip -c > ../configboot.tar.gz
+	rm -rf tmp
 

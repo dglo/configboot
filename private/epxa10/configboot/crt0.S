@@ -110,7 +110,7 @@ Boot:
 	bl memset
 
 	/* Enter SVC mode and use the USR stack pointer */
-	msr     cpsr_c, #Mode_SVC | F_Bit /* interrupts on */
+	msr     cpsr_c, #Mode_SVC | F_Bit | I_Bit /* interrupts off */
 	ldr     sp, =USR_Stack
 
 	/* call the c entry point */
