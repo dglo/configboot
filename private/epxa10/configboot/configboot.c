@@ -157,7 +157,7 @@ int main(int argc, char *argv[]) {
    /* default to boot from flash... */
    setBootFlash();
    
-   putst("configboot v2.7\r\n");
+   putst("\r\nconfigboot v2.7\r\n");
    putst("type ? for help\r\n");
    putst("# ");
 
@@ -272,7 +272,7 @@ static int lock_chip(int chip) {
 }
 
 static void programFlash(int schip, int echip) {
-   void *fs; /* , *fe; */
+   void *fs;
    int ck=0, cksum=0;
    int allDone = 0;
    int len = 0;
@@ -294,27 +294,11 @@ static void programFlash(int schip, int echip) {
       ST_OFFSET0, ST_OFFSET1, ST_OFFSET2, ST_OFFSET3 /* 13, 14, 15, 16, 17 */
    } state = ST_START;
 
-   putst("program flash\r\n");
-
    chip_start[0] = (unsigned) flash_chip_addr(0);
    chip_start[1] = (unsigned) flash_chip_addr(1);
    chip_end[0] = chip_start[1]-1;
    chip_end[1] = (unsigned) (0x41000000 + 0x00800000 - 1);
    fs = (void *)chip_start[schip];
-
-   putst("chip_start: "); puti(chip_start[0]);
-   putst(" , ");
-   puti(chip_start[1]);
-   putst("\r\n");
-   
-   putst("chip_end: "); puti(chip_end[0]);
-   putst(" , ");
-   puti(chip_end[1]);
-   putst("\r\n");
-
-   putst("fs: ");
-   puti((int) fs);
-   putst("\r\n");
 
    for (i=schip; i<=echip; i++) {
       /* unlock all data
@@ -324,7 +308,7 @@ static void programFlash(int schip, int echip) {
       putst("... ");
       if (unlock_chip(i)) nerrors++;
       
-      /* erase all data -- except for iceboot...
+      /* erase all data...
        */
       putst("erase chip: "); 
       puti(i);
