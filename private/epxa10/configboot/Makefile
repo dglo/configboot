@@ -39,11 +39,7 @@ $(CONFIGBOOTHEX): configboot.o crt0.o memset.o configboot.x
 		$(ARM_HOME)/arm-elf/lib/gcc-lib/arm-elf/3.2/libgcc.a
 	$(OBJCOPY) -O ihex configboot.elf $(CONFIGBOOTHEX)
 
-crt0.o : crt0.S ../booter/configboot-pte.S \
-	../booter/configboot-epxa.h
-	if [[ ! -d booter ]]; then mkdir booter; fi
-	cp -v ../booter/configboot-pte.S booter/pte.S
-	cp -v ../booter/configboot-epxa.h booter/epxa.h
+crt0.o : crt0.S 
 	$(CPP) -o crt0.i -I. crt0.S
 	$(AS) $(AFLAGS) -o crt0.o crt0.i
 
