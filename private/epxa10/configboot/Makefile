@@ -30,20 +30,31 @@ clean:
 	rm -f *.o *.i configboot.elf
 	rm -rf booter
 
-configboot.o: configboot.c
+configboot.o: configboot.c memset.S crt0.S
 
-$(CONFIGBOOTHEX): configboot.o crt0.o configboot.x
+$(CONFIGBOOTHEX): configboot.o crt0.o memset.o configboot.x
 	$(LD) --script=configboot.x -o configboot.elf crt0.o configboot.o \
+		memset.o \
+		../hal/comm-hal.o ../hal/hal.o \
 		$(ARM_HOME)/arm-elf/lib/gcc-lib/arm-elf/3.2/libgcc.a
 	$(OBJCOPY) -O ihex configboot.elf $(CONFIGBOOTHEX)
 
-crt0.o : ../loader/crt0.S ../booter/configboot-pte.S \
+crt0.o : crt0.S ../booter/configboot-pte.S \
 	../booter/configboot-epxa.h
 	if [[ ! -d booter ]]; then mkdir booter; fi
 	cp -v ../booter/configboot-pte.S booter/pte.S
 	cp -v ../booter/configboot-epxa.h booter/epxa.h
-	$(CPP) -o crt0.i -I. ../loader/crt0.S
+	$(CPP) -o crt0.i -I. crt0.S
 	$(AS) $(AFLAGS) -o crt0.o crt0.i
+
+memset.o: memset.S
+	$(AS) $(AFLAGS) -o memset.o memset.S
+
+#
+# c:\quartus\bin\makeprogfile.exe -e EPC8 --pof configboot.pof \
+#   simpletest.sbd simpletest.psof configboot.hex
+#
+
 
 
 
