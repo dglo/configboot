@@ -1,149 +1,50 @@
-/* this C file should have no
- * external dependencies.  i'm trying
- * to make these 1k lines or so as bug-
- * free as possible.
- *
- * we can exist in a very minimal environment,
+/* we exist in a very minimal environment,
  * no interrupts, no ptes, etc...
  */
 #define NULL ((void*) 0)
 
-#define DOM_PLD_BASE (0x50000000)
-#define DOM_PLD_REBOOT_CONTROL   (DOM_PLD_BASE + 0x0000000e)
-#define   DOM_PLD_REBOOT_CONTROL_INITIATE_REBOOT 0x01
+#include "hal/DOM_MB_hal.h"
 
-#define DOM_PLD_BOOT_CONTROL     (DOM_PLD_BASE + 0x0000000f)
-#define   DOM_PLD_BOOT_CONTROL_ALTERNATE_FLASH 0x01
-#define   DOM_PLD_BOOT_CONTROL_BOOT_FROM_FLASH 0x02
-#define   DOM_PLD_BOOT_CONTROL_NCONFIG         0x08
-
-#define DOM_PLD_BOOT_STATUS      (DOM_PLD_BASE + 0x0000000f)
-#define   DOM_PLD_BOOT_STATUS_ALTERNATE_FLASH 0x01
-#define   DOM_PLD_BOOT_STATUS_BOOT_FROM_FLASH 0x02
-#define   DOM_PLD_BOOT_STATUS_INIT_DONE       0x03
-#define   DOM_PLD_BOOT_STATUS_NCONFIG         0x04
-
-
-#define PLD(a) ( *(volatile unsigned char *) DOM_PLD_##a )
-#define PLDBIT(a, b) (DOM_PLD_##a##_##b)
-#define PLDBIT2(a, b, c) (DOM_PLD_##a##_##b | DOM_PLD_##a##_##c)
-
-/* usage: RPLDBIT(BOOT_STATUS, ALTERNATE_FLASH) */
-#define RPLDBIT(a, b) ( PLD(a) & PLDBIT(a, b) )
-#define RPLDBIT2(a, b, c) ( PLD(a) & (PLDBIT(a, b) | PLDBIT(a, c)) )
-#define RPLDBIT3(a, b, c, d) ( PLD(a) & (PLDBIT(a, b) | PLDBIT(a, c) | PLDBIT(a, d)) )
-
-static int isSerialPower(void) {
-   static int isInit = 0;
-   static int ret = 0;
-   
-   if (!isInit) {
-      ret = (*(volatile unsigned char *)0x5000000b) & 1;
-      isInit=1;
-   }
-   return ret;
-}
-
-static void initComm(void) {
-   if (isSerialPower()) {
-      *(volatile unsigned *)0x7fffc2a8 = 3;
-      *(volatile unsigned *)0x7fffc2ac = 0xc3;
-      *(volatile unsigned *)0x7fffc294 = 0;
-      *(volatile unsigned *)0x7fffc298 = 0;
-      *(volatile unsigned *)0x7fffc2b4 = 0x2b;
-      *(volatile unsigned *)0x7fffc2b8 = 0;
-   }
-}
-
-#define FPGA(a) ( *(volatile unsigned *) DOM_FPGA_##a )
-#define FPGABIT(a, b) (DOM_FPGA_##a##_##b)
-#define RFPGABIT(a, b) ( FPGA(a) & FPGABIT(a, b) )
-#define DOM_FPGA_BASE (0x90000000)
-#define DOM_FPGA_TEST_BASE (DOM_FPGA_BASE + 0x00080000) 
-#define DOM_FPGA_TEST_COM_RX_DATA (DOM_FPGA_TEST_BASE + 0x103C)
-#define DOM_FPGA_TEST_COM_STATUS (DOM_FPGA_TEST_BASE + 0x1034)
-#define DOM_FPGA_TEST_COM_STATUS_RX_MSG_READY     0x00000001
-#define DOM_FPGA_TEST_COM_STATUS_TX_FIFO_ALMOST_FULL  0x00020000
-#define DOM_FPGA_TEST_COM_CTRL (DOM_FPGA_TEST_BASE + 0x1030)
-#define DOM_FPGA_TEST_COM_CTRL_RX_DONE     0x00000001
-#define DOM_FPGA_TEST_COM_TX_DATA (DOM_FPGA_TEST_BASE + 0x1038)
+/* FIXME: this should be factored out into hal... */
+#include "../iceboot/flashdrv.c"
 
 static int getbyte(void) {
+   static unsigned char buffer[4096];
+   static int bi=0, nb=0;
    
-   if (isSerialPower()) {
-      while ( ((*(volatile unsigned *) 0x7fffc280) & 0x1f) == 0) ;
-      return *(volatile unsigned *) 0x7fffc288;
+   /* no mas? */
+   if (bi==nb) {
+      int type;
+      hal_FPGA_TEST_receive(&type, &nb, buffer);
+      bi = 0;
    }
-   else {
-      static int pending = 0;
-      int ret = -1;
 
-      while (pending==0) {
-	 unsigned bytes[2];
-
-	 /* wait for msg */
-	 while (!RFPGABIT(TEST_COM_STATUS, RX_MSG_READY)) ;
-	 
-	 /* read type -- and drop it on the floor... */
-	 bytes[0] = FPGA(TEST_COM_RX_DATA)&0xff;
-	 bytes[1] = FPGA(TEST_COM_RX_DATA)&0xff;
-	 
-	 /* read length */
-	 bytes[0] = FPGA(TEST_COM_RX_DATA)&0xff;
-	 bytes[1] = FPGA(TEST_COM_RX_DATA)&0xff;
-	 pending = (bytes[1]<<8) | bytes[0];
-      }
-
-      /* read next byte... */
-      ret = FPGA(TEST_COM_RX_DATA)&0xff;
-      pending--;
-
-      if (pending==0) {
-	 unsigned reg = FPGA(TEST_COM_CTRL);
-	 FPGA(TEST_COM_CTRL) = reg | FPGABIT(TEST_COM_CTRL, RX_DONE);
-	 FPGA(TEST_COM_CTRL) = reg & (~FPGABIT(TEST_COM_CTRL, RX_DONE));
-      }
+   {  int ret = buffer[bi];
+      bi++;
       return ret;
    }
-   return 0;
 }
 
-static void putdor(const char *msg, int len) {
-   int type = 0;
-   int i;
-   
-   /* wait for Tx fifo almost full to be low */
-   while (RFPGABIT(TEST_COM_STATUS, TX_FIFO_ALMOST_FULL)) ;
-   
-   /* send data */
-   FPGA(TEST_COM_TX_DATA) = type&0xff; 
-   FPGA(TEST_COM_TX_DATA) = (type>>8)&0xff;  
-   FPGA(TEST_COM_TX_DATA) = len&0xff; 
-   FPGA(TEST_COM_TX_DATA) = (len>>8)&0xff; 
+static int ndorerrors = 0;
 
-   for (i=0; i<len; i++) FPGA(TEST_COM_TX_DATA) = msg[i];
+static void putdor(const char *msg, int len) {
+   if (len==0) {
+      ndorerrors++;
+      return;
+   }
+
+   hal_FPGA_TEST_send(0, len, msg);
 }
 
 static void putch(int c) {
-   if (isSerialPower()) {
-      while ( ((*(volatile unsigned *) 0x7fffc28c) & 0x1f) >= 15) ;
-      *(volatile unsigned *) 0x7fffc290 = c;
-   }
-   else {
-      char ch = (char) c;
-      putdor(&ch, 1);
-   }
+   char ch = (char) c;
+   putdor(&ch, 1);
 }
 
 static void putst(const char *p) {
-   if (!isSerialPower()) {
-      const char *pp = p;
-      while (*pp) pp++;
-      putdor(p, pp-p);
-   }
-   else {
-      while (*p) { putch(*p); p++; }
-   }
+   int n = 0;
+   while (p[n]!=0) n++;
+   putdor(p, n);
 }
 
 static void puti(unsigned i) {
@@ -179,21 +80,12 @@ static void prtCmds(void) {
    putst("  p [schip echip] : program flash starting at schip (0 or 1) to"
 	  " echip (0 or 1)\r\n");
    putst("  ?               : show commands\r\n");
+   putst("  hi!\r\n");
 }
 
-static void setBootFlash(void) { 
-   const unsigned char reg = PLD(BOOT_CONTROL);
-   PLD(BOOT_CONTROL) = PLDBIT(BOOT_CONTROL, BOOT_FROM_FLASH) | reg;
-}
-
-static void clrBootFlash(void) { 
-   const unsigned char reg = PLD(BOOT_CONTROL);
-   PLD(BOOT_CONTROL) = ~PLDBIT(BOOT_CONTROL, BOOT_FROM_FLASH) & reg;
-}
-
-static int  isBootFlash(void)  { 
-   return RPLDBIT(BOOT_CONTROL, BOOT_FROM_FLASH)!=0;
-}
+static inline void setBootFlash(void) { halSetFlashBoot(); }
+static inline void clrBootFlash(void) { halClrFlashBoot(); }
+static inline int isBootFlash(void)  { return halFlashBootState(); }
 
 static void prtBootFlash(void) {
    putst("  Boot from ");
@@ -205,10 +97,10 @@ static void prtBootFlash(void) {
    }
 }
 
-static int swapFlash = 0;
-static void setSwapFlash(void) { swapFlash = 1; }
-static void clrSwapFlash(void) { swapFlash = 0; }
-static int  isSwapFlash(void) { return swapFlash; }
+static inline void setSwapFlash(void) { halSetSwapFlashChips(); }
+static inline void clrSwapFlash(void) { halClrSwapFlashChips(); }
+static inline int  isSwapFlash(void) { return halSwapFlashChipsState(); }
+
 static void prtSwapFlash(void) {
    if (!isSwapFlash()) {
       putst("  Don't s");
@@ -225,22 +117,31 @@ static int nibble(char c) {
    return -1;
 }
 
-static int commAvail(void) {
+static void reboot(void) { halBoardReboot(); }
+
+static void initComm(void) {
+   /* wait for comm avail... */
+   while (!hal_FPGA_TEST_is_comm_avail()) ;
+}
+
+int memcmp(const void *s1, const void *s2, unsigned n) {
+   const unsigned char *c1 = (const unsigned char *) s1;
+   const unsigned char *c2 = (const unsigned char *) s2;
+   unsigned i;
+   
+   for (i=0; i<n; i++, c1++, c2++) {
+      if (*c1<*c2) return -1;
+      if (*c1>*c2) return 1;
+   }
    return 0;
 }
 
-static void reboot(void) {
-   /* we know fpga is loaded */
- 
-   /* if comm avail... */
-   if (commAvail()) {
-      /* request reboot */
-      /* wait for reboot request... */
-   }
-   
-   /* hit pld with reboot request */
-   PLD(REBOOT_CONTROL) = PLDBIT(REBOOT_CONTROL, INITIATE_REBOOT);
-   *(volatile unsigned char *)0x50000000 = 1;
+void *memcpy(void *dest, const void *src, unsigned n) {
+   unsigned char *cdest = (unsigned char *) dest;
+   const unsigned char *csrc = (const unsigned char *) src;
+   unsigned i;
+   for (i=0; i<n; i++, cdest++, csrc++) *cdest = *csrc;
+   return dest;
 }
 
 int main(int argc, char *argv[]) {
@@ -260,10 +161,18 @@ int main(int argc, char *argv[]) {
    putst("configboot v2.7\r\n");
    putst("type ? for help\r\n");
    putst("# ");
+
+#if 0
+   putst("stack: ");
+   puti((int)&schip);
+   putst("\r\n");
+#endif
+
    while (1) {
-      int c;
-      
-      c = getbyte();
+      const int c = getbyte();
+
+      if (c>=0x20 && c<=0x7f) putch(c);
+
       if (state==ST_READY) {
 	 if (c=='?') { 
 	    prtCmds();
@@ -274,6 +183,11 @@ int main(int argc, char *argv[]) {
 	    prtBootFlash();
 	    prtSwapFlash();
 	    prtNumErrors();
+
+            putst("    numdorerrors: ");
+            puti(ndorerrors);
+            putst("\r\n");
+
 	    putst("# ");
 	 }
 	 else if (c=='f') {
@@ -305,6 +219,7 @@ int main(int argc, char *argv[]) {
 	 }
 	 else if (c=='r') {
 	    putst("rebooting...\r\n\r\n");
+            /* FIXME: wait for msg to get through... */
 	    reboot();
 	    /* doesn't return ... */
 	 }
@@ -313,9 +228,10 @@ int main(int argc, char *argv[]) {
 	 }
       }
       else if (state==ST_SCHIP) {
-	 if (c=='0') { schip = 0; state = ST_ECHIP; }
-	 if (c=='1') { schip = 1; state = ST_ECHIP; }
-	 if (c=='\r' || c=='\n') {
+	 if (c=='0')      { schip = 0; state = ST_ECHIP; }
+	 else if (c=='1') { schip = 1; state = ST_ECHIP; }
+	 else if (c=='\r' || c=='\n') {
+            putst("\r\n");
 	    programFlash(0, 1);
 	    state=ST_READY;
 	    putst("\r\n");
@@ -325,6 +241,7 @@ int main(int argc, char *argv[]) {
       }
       else if (state==ST_ECHIP) {
 	 if (c=='0' && schip==0) {
+            putst("\r\n");
 	    programFlash(0, 0);
 	    state = ST_READY; 
 	    putst("\r\n");
@@ -332,6 +249,7 @@ int main(int argc, char *argv[]) {
 	    putst("# ");
 	 }
 	 if (c=='1') { 
+            putst("\r\n");
 	    programFlash(schip, 1);
 	    state = ST_READY; 
 	    putst("\r\n");
@@ -344,6 +262,22 @@ int main(int argc, char *argv[]) {
    return 0;
 }
 
+static int erase_chip(int chip) {
+   if (chip<0 || chip>1) return 1;
+   return flash_erase(flash_chip_addr(chip), 0x00400000);
+}
+
+static int unlock_chip(int chip) {
+   if (chip<0 || chip>1) return 1;
+   return flash_unlock(flash_chip_addr(chip), 0x00400000);
+}
+
+static int lock_chip(int chip) {
+   if (chip<0 || chip>1) return 1;
+   return flash_unlock(flash_chip_addr(chip), 0x00400000);
+}
+
+#if 0
 /* block size in 16 bit words 
  */
 static int blkSize(int blk) { return (blk<8) ? 4*1024 : 32*1024; }
@@ -397,15 +331,27 @@ static void *flash_chip_addr(int chip) {
 
 static int unlock_chip(int chip) {
    const int sblk = addrtoblock(flash_chip_addr(chip));
-   const int eblk = addrtoblock((char *)flash_chip_addr(chip) + 0x04000000);
+   const int eblk = addrtoblock((char *)flash_chip_addr(chip) + 0x00400000);
    volatile short *flash;
    int i;
    
    flash = blktoaddr(chip, 0);
+
+   putst("flash: ");
+   puti((int) flash);
+   putst("\r\n");
+
    *flash = 0x50; /* clear status register... */
    
    for (i=sblk; i<=eblk; i++) {
       volatile short *block = blktoaddr(chip, i);
+
+      putst("block: ");
+      puti((int) block);
+      putst("(");
+      puti(sblk);
+      putst(")\r\n");
+
       *flash = 0x60;
       *block = 0xd0;
    }
@@ -422,6 +368,9 @@ static int unlock_chip(int chip) {
    /* back to read array mode... */
    *flash = 0xff;
 
+   putst("done unlock!\r\n");
+   
+
    /* send back confirmation...
     */
    return (i<=eblk) ? 1 : 0;
@@ -429,7 +378,7 @@ static int unlock_chip(int chip) {
 
 static int lock_chip(int chip) {
    const int sblk = 0;
-   const int eblk = addrtoblock((char *)flash_chip_addr(chip) + 0x04000000);
+   const int eblk = addrtoblock((char *)flash_chip_addr(chip) + 0x00400000);
    volatile short *flash;
    int i;
    
@@ -458,72 +407,6 @@ static int lock_chip(int chip) {
 
    /* send back confirmation...
     */
-   return (i<=eblk) ? 1 : 0;
-}
-
-static int erase_chip(int chip) {
-   const int sblk = addrtoblock(flash_chip_addr(chip));
-   const int eblk = addrtoblock((char *)flash_chip_addr(chip) + 0x04000000);
-   volatile short *flash;
-   int i;
-
-   flash = blktoaddr(chip, 0);
-   *flash = 0x50; /* clear status register... */
-
-   for (i=sblk; i<=eblk; i++) {
-      volatile short *block = blktoaddr(chip, i);
-      unsigned short sr;
-
-      *block = 0x20;
-      *block = 0xd0;
-      
-      while (1) {
-	 sr = *block;
-	 if (sr&0x80) break;
-      }
-
-      /* error? */
-      if (sr&(1<<5)) { 
-	 if (sr&(1<<3)) {
-	    putst("flash: error: vpp range error!\r\n");
-	    break;
-	 }
-	 else if ( (sr&(3<<4)) == (3<<4)) {
-	    putst("flash: error: command sequence error!\r\n");
-	    break;
-	 }
-	 else if (sr&2) {
-	    putst("flash: error: attempt to erase locked block!\r\n");
-	    break;
-	 }
-	 else {
-	    putst("flash: error: unknown error: ");
-	    puti(sr);
-	    putst("\r\n");
-	    break;
-	 }
-      }
-   }
-
-   /* back to read array mode... 
-    */
-   flash = blktoaddr(chip, 0);
-   *flash = 0xff;
-
-   /* send back confirmation...
-    */
-   for (i=sblk; i<=eblk; i++) {
-      volatile unsigned short *block = blktoaddr(chip, i);
-      int j;
-      const int sz = blkSize(i);
-      int err = 0;
-
-      for (j=0; j<sz && !err; j++)
-	 if (block[j]!=0xffff) 
-	    nerrors++;
-      if (err) break;
-   }
-   
    return (i<=eblk) ? 1 : 0;
 }
 
@@ -567,9 +450,10 @@ static int flash_write(void *to, const void *mem, int cnt) {
     */
    return (feq(to, mem, cnt)==0) ? 0 : 1;
 }
+#endif
 
 static void programFlash(int schip, int echip) {
-   void *fs, *fe;
+   void *fs; /* , *fe; */
    int ck=0, cksum=0;
    int allDone = 0;
    int len = 0;
@@ -591,11 +475,27 @@ static void programFlash(int schip, int echip) {
       ST_OFFSET0, ST_OFFSET1, ST_OFFSET2, ST_OFFSET3 /* 13, 14, 15, 16, 17 */
    } state = ST_START;
 
+   putst("program flash\r\n");
+
    chip_start[0] = (unsigned) flash_chip_addr(0);
    chip_start[1] = (unsigned) flash_chip_addr(1);
    chip_end[0] = chip_start[1]-1;
-   chip_end[1] = (unsigned) fe;
+   chip_end[1] = (unsigned) (0x41000000 + 0x00800000 - 1);
    fs = (void *)chip_start[schip];
+
+   putst("chip_start: "); puti(chip_start[0]);
+   putst(" , ");
+   puti(chip_start[1]);
+   putst("\r\n");
+   
+   putst("chip_end: "); puti(chip_end[0]);
+   putst(" , ");
+   puti(chip_end[1]);
+   putst("\r\n");
+
+   putst("fs: ");
+   puti((int) fs);
+   putst("\r\n");
 
    for (i=schip; i<=echip; i++) {
       /* unlock all data
@@ -796,20 +696,4 @@ static void programFlash(int schip, int echip) {
       if (lock_chip(i)) nerrors++;
    }
    putst("\r\n");
-}
-
-/* interrupt handlers... */
-void CAbtHandler(void) {}
-void CUdefHandler(void){}
-void CSwiHandler(void){}
-void CIrqHandler(void){}
-void CPabtHandler(void){}
-void CDabtHandler(void){}
-void CFiqHandler(void){}
-
-void *memset(void *p, int c, unsigned n) {
-	char *cp = (char *) p;
-	int i;
-	for (i=0; i<n; i++) cp[i] = c;
-	return p;
 }
