@@ -134,7 +134,17 @@ static int nibble(char c) {
    return -1;
 }
 
-static void reboot(void) { halBoardReboot(); }
+/* can't use halBoardReboot as we no longer
+ * have use of the fpga loaded flag in the
+ * configboot sbi file...
+ */
+static void reboot(void) { 
+   hal_FPGA_TEST_request_reboot();
+
+   while (!hal_FPGA_TEST_is_reboot_granted()) ;
+
+   * (unsigned char *) 0x5000000e = 1;
+}
 
 static void initComm(void) {
    /* wait for comm avail... */
@@ -175,7 +185,7 @@ int main(int argc, char *argv[]) {
    /* default to boot from flash... */
    setBootFlash();
    
-   putst("\r\nconfigboot v2.7\r\n");
+   putst("\r\nconfigboot v2.71\r\n");
    putst("type ? for help\r\n");
    putst("# ");
 
