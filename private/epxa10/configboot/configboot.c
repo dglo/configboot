@@ -472,6 +472,12 @@ static int erase_chip(int chip) {
    return (i<=eblk) ? 1 : 0;
 }
 
+static int feq(const short *p1, const short *p2, int n) {
+	int i;
+	for (i=0; i<(n+1)/2; i++) if (p1[i]!=p2[i]) return 1;
+	return 0;
+}
+
 static int flash_write(void *to, const void *mem, int cnt) {
    volatile short *addr = (volatile short *) to;
    const short *ptr = (const short *) mem;
@@ -504,7 +510,7 @@ static int flash_write(void *to, const void *mem, int cnt) {
 
    /* send back confirmation...
     */
-   return (memcmp(to, mem, cnt)==0) ? 0 : 1;
+   return (feq(to, mem, cnt)==0) ? 0 : 1;
 }
 
 static void programFlash(int schip, int echip) {
@@ -735,4 +741,20 @@ static void programFlash(int schip, int echip) {
       if (lock_chip(i)) nerrors++;
    }
    putst("\n");
+}
+
+/* interrupt handlers... */
+void CAbtHandler(void) {}
+void CUdefHandler(void){}
+void CSwiHandler(void){}
+void CIrqHandler(void){}
+void CPabtHandler(void){}
+void CDabtHandler(void){}
+void CFiqHandler(void){}
+
+void *memset(void *p, int c, unsigned n) {
+	char *cp = (char *) p;
+	int i;
+	for (i=0; i<n; i++) cp[i] = c;
+	return p;
 }
