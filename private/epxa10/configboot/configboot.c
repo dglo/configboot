@@ -8,6 +8,31 @@
  */
 #define NULL ((void*) 0)
 
+#define DOM_PLD_BASE (0x50000000)
+#define DOM_PLD_REBOOT_CONTROL   (DOM_PLD_BASE + 0x0000000e)
+#define   DOM_PLD_REBOOT_CONTROL_INITIATE_REBOOT 0x01
+
+#define DOM_PLD_BOOT_CONTROL     (DOM_PLD_BASE + 0x0000000f)
+#define   DOM_PLD_BOOT_CONTROL_ALTERNATE_FLASH 0x01
+#define   DOM_PLD_BOOT_CONTROL_BOOT_FROM_FLASH 0x02
+#define   DOM_PLD_BOOT_CONTROL_NCONFIG         0x08
+
+#define DOM_PLD_BOOT_STATUS      (DOM_PLD_BASE + 0x0000000f)
+#define   DOM_PLD_BOOT_STATUS_ALTERNATE_FLASH 0x01
+#define   DOM_PLD_BOOT_STATUS_BOOT_FROM_FLASH 0x02
+#define   DOM_PLD_BOOT_STATUS_INIT_DONE       0x03
+#define   DOM_PLD_BOOT_STATUS_NCONFIG         0x04
+
+
+#define PLD(a) ( *(volatile unsigned char *) DOM_PLD_##a )
+#define PLDBIT(a, b) (DOM_PLD_##a##_##b)
+#define PLDBIT2(a, b, c) (DOM_PLD_##a##_##b | DOM_PLD_##a##_##c)
+
+/* usage: RPLDBIT(BOOT_STATUS, ALTERNATE_FLASH) */
+#define RPLDBIT(a, b) ( PLD(a) & PLDBIT(a, b) )
+#define RPLDBIT2(a, b, c) ( PLD(a) & (PLDBIT(a, b) | PLDBIT(a, c)) )
+#define RPLDBIT3(a, b, c, d) ( PLD(a) & (PLDBIT(a, b) | PLDBIT(a, c) | PLDBIT(a, d)) )
+
 static int isSerialPower(void) {
    static int isInit = 0;
    static int ret = 0;
@@ -137,36 +162,46 @@ static int nerrors=0;
 static void prtNumErrors(void) {
    putst("  "); 
    puti(nerrors); 
-   putst(" flash programming errors\n");
+   putst(" flash programming errors\r\n");
 }
 
 static void programFlash(int schip, int echip);
 
 static void prtCmds(void) {
-   putst("\n");
-   putst("Commands:\n");
-   putst("  r               : reboot\n");
-   putst("  d               : display current parameters\n");
-   putst("  f               : set boot from flash mode\n");
-   putst("  s               : set boot from serial mode\n");
-   putst("  b               : set swap flash A and B mode\n");
-   putst("  a               : set canonical flash A and B mode\n");
+   putst("\r\n");
+   putst("Commands:\r\n");
+   putst("  r               : reboot\r\n");
+   putst("  d               : display current parameters\r\n");
+   putst("  f               : set boot from flash mode\r\n");
+   putst("  s               : set boot from serial mode\r\n");
+   putst("  b               : set swap flash A and B mode\r\n");
+   putst("  a               : set canonical flash A and B mode\r\n");
    putst("  p [schip echip] : program flash starting at schip (0 or 1) to"
-	  " echip (0 or 1)\n");
-   putst("  ?               : show commands\n");
+	  " echip (0 or 1)\r\n");
+   putst("  ?               : show commands\r\n");
 }
 
-static int bootFlash = 0;
-static void setBootFlash(void) { bootFlash = 1; }
-static void clrBootFlash(void) { bootFlash = 0; }
-static int  isBootFlash(void)  { return bootFlash; }
+static void setBootFlash(void) { 
+   const unsigned char reg = PLD(BOOT_CONTROL);
+   PLD(BOOT_CONTROL) = PLDBIT(BOOT_CONTROL, BOOT_FROM_FLASH) | reg;
+}
+
+static void clrBootFlash(void) { 
+   const unsigned char reg = PLD(BOOT_CONTROL);
+   PLD(BOOT_CONTROL) = ~PLDBIT(BOOT_CONTROL, BOOT_FROM_FLASH) & reg;
+}
+
+static int  isBootFlash(void)  { 
+   return RPLDBIT(BOOT_CONTROL, BOOT_FROM_FLASH)!=0;
+}
+
 static void prtBootFlash(void) {
    putst("  Boot from ");
    if (isBootFlash()) {
-      putst("flash\n");
+      putst("flash\r\n");
    }
    else {
-      putst("serial\n");
+      putst("serial\r\n");
    }
 }
 
@@ -180,7 +215,7 @@ static void prtSwapFlash(void) {
    }
    else putst("  S");
    
-   putst("wap flash A and B\n");
+   putst("wap flash A and B\r\n");
 }
 
 static int nibble(char c) {
@@ -188,6 +223,24 @@ static int nibble(char c) {
    if (c>='a' && c<='f') return c - 'a' + 10;
    if (c>='A' && c<='F') return c - 'A' + 10;
    return -1;
+}
+
+static int commAvail(void) {
+   return 0;
+}
+
+static void reboot(void) {
+   /* we know fpga is loaded */
+ 
+   /* if comm avail... */
+   if (commAvail()) {
+      /* request reboot */
+      /* wait for reboot request... */
+   }
+   
+   /* hit pld with reboot request */
+   PLD(REBOOT_CONTROL) = PLDBIT(REBOOT_CONTROL, INITIATE_REBOOT);
+   *(volatile unsigned char *)0x50000000 = 1;
 }
 
 int main(int argc, char *argv[]) {
@@ -204,8 +257,8 @@ int main(int argc, char *argv[]) {
    /* default to boot from flash... */
    setBootFlash();
    
-   putst("configboot v2.7\n");
-   putst("type ? for help\n");
+   putst("configboot v2.7\r\n");
+   putst("type ? for help\r\n");
    putst("# ");
    while (1) {
       int c;
@@ -217,7 +270,7 @@ int main(int argc, char *argv[]) {
 	    putst("# ");
 	 }
 	 else if (c=='d') {
-	    putst("\nParameters:\n");
+	    putst("\r\nParameters:\r\n");
 	    prtBootFlash();
 	    prtSwapFlash();
 	    prtNumErrors();
@@ -225,25 +278,25 @@ int main(int argc, char *argv[]) {
 	 }
 	 else if (c=='f') {
 	    setBootFlash();
-	    putst("\n");
+	    putst("\r\n");
 	    prtBootFlash();
 	    putst("# ");
 	 }
 	 else if (c=='s') {
 	    clrBootFlash();
-	    putst("\n");
+	    putst("\r\n");
 	    prtBootFlash();
 	    putst("# ");
 	 }
 	 else if (c=='b') {
 	    setSwapFlash();
-	    putst("\n");
+	    putst("\r\n");
 	    prtSwapFlash();
 	    putst("# ");
 	 }
 	 else if (c=='a') {
 	    clrSwapFlash();
-	    putst("\n");
+	    putst("\r\n");
 	    prtSwapFlash();
 	    putst("# ");
 	 }
@@ -251,10 +304,12 @@ int main(int argc, char *argv[]) {
 	    state = ST_SCHIP;
 	 }
 	 else if (c=='r') {
-	    break;
+	    putst("rebooting...\r\n\r\n");
+	    reboot();
+	    /* doesn't return ... */
 	 }
-	 else if (c=='\n') {
-	    putst("# ");
+	 else if ('\r') {
+	    putst("\r\n# ");
 	 }
       }
       else if (state==ST_SCHIP) {
@@ -263,7 +318,7 @@ int main(int argc, char *argv[]) {
 	 if (c=='\r' || c=='\n') {
 	    programFlash(0, 1);
 	    state=ST_READY;
-	    putst("\n");
+	    putst("\r\n");
 	    prtNumErrors();
 	    putst("# ");
 	 }
@@ -272,14 +327,14 @@ int main(int argc, char *argv[]) {
 	 if (c=='0' && schip==0) {
 	    programFlash(0, 0);
 	    state = ST_READY; 
-	    putst("\n");
+	    putst("\r\n");
 	    prtNumErrors();
 	    putst("# ");
 	 }
 	 if (c=='1') { 
 	    programFlash(schip, 1);
 	    state = ST_READY; 
-	    putst("\n");
+	    putst("\r\n");
 	    prtNumErrors();
 	    putst("# ");
 	 }
@@ -557,7 +612,7 @@ static void programFlash(int schip, int echip) {
       putst("... ");
       if (erase_chip(i)) nerrors++;
    }
-   putst("\nReady...");
+   putst("\r\nReady...");
    
    while (!allDone) {
       char c = getbyte();
@@ -740,7 +795,7 @@ static void programFlash(int schip, int echip) {
       putst("lock chip "); puti(i); putst("... ");
       if (lock_chip(i)) nerrors++;
    }
-   putst("\n");
+   putst("\r\n");
 }
 
 /* interrupt handlers... */

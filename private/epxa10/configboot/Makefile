@@ -1,9 +1,6 @@
-all: $(CONFIGBOOTBIN)
+all: $(CONFIGBOOTHEX)
 
 doc: configboot-ug.dvi
-
-#configboot: configboot.c
-#	gcc -o configboot -Wall configboot.c
 
 configboot-ug.dvi: configboot-ug.tex configboot-ug.ind 
 	latex configboot-ug.tex
@@ -30,7 +27,7 @@ clean:
 		configboot-ug.log configboot-ug.aux \
 		configboot-ug.ilg configboot-ug.idx \
 		configboot-ug.toc
-	rm -f *.o *.i
+	rm -f *.o *.i configboot.elf
 	rm -rf booter
 
 configboot.o: configboot.c
