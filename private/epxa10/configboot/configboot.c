@@ -231,7 +231,11 @@ int main(int argc, char *argv[]) {
 	    state = ST_SCHIP;
 	 }
 	 else if (c=='r') {
-            /* FIXME: wait for msg to get through... */
+            putst("\r\n");
+            {  /* wait a bit for tx to drain... */
+               volatile int i;
+               for (i=0; i<1000000; i++) ;
+            }
 	    reboot();
 	    /* doesn't return ... */
 	 }
