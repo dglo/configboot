@@ -59,11 +59,28 @@ static void puti(unsigned i) {
    }
 }
 
-static int nerrors=0;
-static void prtNumErrors(void) {
+static int nUnlockErrors=0;
+static int nLockErrors=0;
+static int nEraseErrors=0;
+static int nWriteErrors=0;
+static int nCksumErrors=0;
+static int nParseErrors=0;
+
+static void prtErrors(int nerrors, const char *msg) {
    putst("  "); 
-   puti(nerrors); 
-   putst(" flash programming errors\r\n");
+   puti(nerrors);
+   putst(" flash ");
+   putst(msg);
+   putst(" errors\r\n");
+}
+
+static void prtNumErrors(void) {
+   prtErrors(nUnlockErrors, "unlock");
+   prtErrors(nLockErrors, "lock");
+   prtErrors(nEraseErrors, "erase");
+   prtErrors(nWriteErrors, "write");
+   prtErrors(nCksumErrors, "checksum");
+   prtErrors(nParseErrors, "parse");
 }
 
 static void programFlash(int schip, int echip);
@@ -113,6 +130,7 @@ static int nibble(char c) {
    if (c>='0' && c<='9') return c - '0';
    if (c>='a' && c<='f') return c - 'a' + 10;
    if (c>='A' && c<='F') return c - 'A' + 10;
+   nParseErrors++;
    return -1;
 }
 
@@ -273,7 +291,7 @@ static int lock_chip(int chip) {
 
 static void programFlash(int schip, int echip) {
    void *fs;
-   int ck=0, cksum=0;
+   signed char ck=0, cksum=0;
    int allDone = 0;
    int len = 0;
    int nb = 0;
@@ -306,14 +324,14 @@ static void programFlash(int schip, int echip) {
       putst("unlock chip: "); 
       puti(i);
       putst("... ");
-      if (unlock_chip(i)) nerrors++;
+      if (unlock_chip(i)) nUnlockErrors++;
       
       /* erase all data...
        */
       putst("erase chip: "); 
       puti(i);
       putst("... ");
-      if (erase_chip(i)) nerrors++;
+      if (erase_chip(i)) nEraseErrors++;
    }
    putst("\r\nReady...");
    
@@ -356,8 +374,7 @@ static void programFlash(int schip, int echip) {
 	 if (n>=0) {
 	    addr <<= 4;
 	    addr += n;
-	    
-	    cksum+=addr;
+	    cksum += addr;
 	    state = ST_ADDR2;
 	 }
       }
@@ -374,7 +391,6 @@ static void programFlash(int schip, int echip) {
 	 if (n>=0) {
 	    addr <<= 4;
 	    addr += n;
-	    
 	    cksum+= (addr&0xff);
 	    type = 0;
 	    state = ST_TYPE0;
@@ -442,7 +458,7 @@ static void programFlash(int schip, int echip) {
 	    offset <<= 4;
 	    offset += n;
 	    ck = 0;
-	    cksum += offset&0xff;
+	    cksum += (offset&0xff);
 	    offset <<= shift;
 	    state = ST_CK0;
 	 }
@@ -464,7 +480,8 @@ static void programFlash(int schip, int echip) {
 		  state = ST_CK0;
 		  /* now program the data... 
 		   */
-		  if (flash_write(fs + offset + addr, data, ndata)) nerrors++;
+		  if (flash_write(fs + offset + addr, data, ndata)) 
+                     nWriteErrors++;
 	       }
 	       nb=0;
 	    }
@@ -482,9 +499,10 @@ static void programFlash(int schip, int echip) {
 	 if (n>=0) {
 	    ck <<= 4;
 	    ck += n;
-	    
-	    if (ck!=0x100 - (cksum&0xff)) nerrors++;
-	    
+            cksum += ck;
+            
+            if ( cksum != 0 ) nCksumErrors++;
+            
 	    if (allDone) break;
 	    else {
 	       cksum = 0;
@@ -496,7 +514,11 @@ static void programFlash(int schip, int echip) {
 
    for (i=schip; i<=echip; i++) {
       putst("lock chip "); puti(i); putst("... ");
-      if (lock_chip(i)) nerrors++;
+      if (lock_chip(i)) nLockErrors++;
    }
    putst("\r\n");
 }
+
+
+
+
